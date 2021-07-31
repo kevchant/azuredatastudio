@@ -39,6 +39,10 @@ export class DacFxTestService implements mssql.IDacFxService {
 		this.dacfxResult.operationId = importOperationId;
 		return Promise.resolve(this.dacfxResult);
 	}
+	updateProjectFromDatabase(targetScripts: string [], sourceDatabase: string, version: string, taskExecutionMode: azdata.TaskExecutionMode): Promise<mssql.DacFxResult> {
+		this.dacfxResult.operationId = importOperationId;
+		return Promise.resolve(this.dacfxResult);
+	}
 	deployDacpac(packageFilePath: string, databaseName: string, upgradeExisting: boolean, ownerUri: string, taskExecutionMode: azdata.TaskExecutionMode, sqlCommandVariableValues?: Record<string, string>): Promise<mssql.DacFxResult> {
 		this.dacfxResult.operationId = deployOperationId;
 		return Promise.resolve(this.dacfxResult);

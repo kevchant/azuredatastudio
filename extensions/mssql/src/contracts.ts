@@ -422,6 +422,13 @@ export enum TaskExecutionMode {
 	executeAndScript = 2,
 }
 
+export interface UpdateLocalProjectParams {
+	targetScripts: string [];
+	sourceDatabase: string;
+	version: string;
+	taskExecutionMode: TaskExecutionMode;
+}
+
 export interface ExportParams {
 	databaseName: string;
 	packageFilePath: string;
@@ -435,7 +442,6 @@ export interface ImportParams {
 	ownerUri: string;
 	taskExecutionMode: TaskExecutionMode;
 }
-
 
 export interface ExtractParams {
 	databaseName: string;
@@ -480,6 +486,10 @@ export interface GetOptionsFromProfileParams {
 export interface ValidateStreamingJobParams {
 	packageFilePath: string,
 	createStreamingJobTsql: string
+}
+
+export namespace UpdateLocalProjectRequest {
+	export const type = new RequestType<UpdateLocalProjectParams, mssql.DacFxResult, void, void>('dacfx/updatelocalproject');
 }
 
 export namespace ExportRequest {

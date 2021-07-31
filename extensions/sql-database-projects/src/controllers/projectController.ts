@@ -24,6 +24,7 @@ import { IDeploySettings } from '../models/IDeploySettings';
 import { BaseProjectTreeItem } from '../models/tree/baseTreeItem';
 import { ProjectRootTreeItem } from '../models/tree/projectTreeItem';
 import { ImportDataModel } from '../models/api/import';
+import { UpdateDataModel } from '../models/api/update';
 import { NetCoreTool, DotNetCommandOptions } from '../tools/netcoreTool';
 import { BuildHelper } from '../tools/buildHelper';
 import { readPublishProfile } from '../models/publishProfile/publishProfile';
@@ -31,6 +32,7 @@ import { AddDatabaseReferenceDialog } from '../dialogs/addDatabaseReferenceDialo
 import { ISystemDatabaseReferenceSettings, IDacpacReferenceSettings, IProjectReferenceSettings } from '../models/IDatabaseReferenceSettings';
 import { DatabaseReferenceTreeItem } from '../models/tree/databaseReferencesTreeItem';
 import { CreateProjectFromDatabaseDialog } from '../dialogs/createProjectFromDatabaseDialog';
+import { UpdateProjectFromDatabaseDialog } from '../dialogs/updateProjectFromDatabaseDialog';
 import { TelemetryActions, TelemetryReporter, TelemetryViews } from '../common/telemetry';
 import { IconPathHelper } from '../common/iconHelper';
 import { DashboardData, PublishData, Status } from '../models/dashboardData/dashboardData';
@@ -909,6 +911,50 @@ export class ProjectsController {
 		}
 	}
 
+	public async createProjectFromDatabaseApiCall(model: ImportDataModel): Promise<void> {
+		let ext = vscode.extensions.getExtension(mssql.extension.name)!;
+
+		const service = (await ext.activate() as mssql.IExtension).dacFx;
+		const ownerUri = await utils.getAzdataApi()!.connection.getUriForConnection(model.serverId);
+
+		await service.createProjectFromDatabase(model.database, model.filePath, model.projName, model.version, ownerUri, model.extractTarget, utils.getAzdataApi()!.TaskExecutionMode.execute);
+
+		// TODO: Check for success; throw error
+	}
+
+	public async updateProjectFromDatabase(context: azdataType.IConnectionProfile | any): Promise<UpdateProjectFromDatabaseDialog> {
+		const profile = this.getConnectionProfileFromContext(context);
+		let updateProjectFromDatabaseDialog = this.getUpdateProjectFromDatabaseDialog(profile);
+
+		updateProjectFromDatabaseDialog.updateProjectFromDatabaseCallback = async (model) => await this.updateProjectFromDatabaseCallback(model);
+
+		await updateProjectFromDatabaseDialog.openDialog();
+
+		return updateProjectFromDatabaseDialog;
+	}
+
+	public getUpdateProjectFromDatabaseDialog(profile: azdataType.IConnectionProfile | undefined): UpdateProjectFromDatabaseDialog {
+		return new UpdateProjectFromDatabaseDialog(profile);
+	}
+
+	public async updateProjectFromDatabaseCallback(model: UpdateDataModel) {
+		try {
+			console.log(model);
+		} catch (err) {
+			vscode.window.showErrorMessage(utils.getErrorMessage(err));
+		}
+	}
+
+	public async updateProjectFromDatabaseApiCall(model: UpdateDataModel): Promise<void> {
+		let ext = vscode.extensions.getExtension(mssql.extension.name)!;
+
+		const service = (await ext.activate() as mssql.IExtension).dacFx;
+		//const ownerUri = await utils.getAzdataApi()!.connection.getUriForConnection(model.serverId);
+
+		await service.updateProjectFromDatabase(model.targetScripts, model.sourceDatabase, model.version, utils.getAzdataApi()!.TaskExecutionMode.execute);
+		// TODO: Check for success; throw error
+	}
+
 	public setFilePath(model: ImportDataModel) {
 		if (model.extractTarget === mssql.ExtractTarget.file) {
 			model.filePath = path.join(model.filePath, `${model.projName}.sql`); // File extractTarget specifies the exact file rather than the containing folder
@@ -923,17 +969,6 @@ export class ProjectsController {
 		// depending on where import new project is launched from, the connection profile could be passed as just
 		// the profile or it could be wrapped in another object
 		return (<any>context).connectionProfile ? (<any>context).connectionProfile : context;
-	}
-
-	public async createProjectFromDatabaseApiCall(model: ImportDataModel): Promise<void> {
-		let ext = vscode.extensions.getExtension(mssql.extension.name)!;
-
-		const service = (await ext.activate() as mssql.IExtension).dacFx;
-		const ownerUri = await utils.getAzdataApi()!.connection.getUriForConnection(model.serverId);
-
-		await service.createProjectFromDatabase(model.database, model.filePath, model.projName, model.version, ownerUri, model.extractTarget, utils.getAzdataApi()!.TaskExecutionMode.execute);
-
-		// TODO: Check for success; throw error
 	}
 
 	/**
