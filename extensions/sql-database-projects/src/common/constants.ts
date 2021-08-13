@@ -171,6 +171,13 @@ export const WorkspaceFileExtension = '.code-workspace';
 export const ProjectParentDirectoryNotExistError = (location: string): string => { return localize('dataworkspace.projectParentDirectoryNotExistError', "The selected project location '{0}' does not exist or is not a directory.", location); };
 export const ProjectDirectoryAlreadyExistError = (projectName: string, location: string): string => { return localize('dataworkspace.projectDirectoryAlreadyExistError', "There is already a directory named '{0}' in the selected location: '{1}'.", projectName, location); };
 
+// Update Project From Database dialog strings
+
+export const updateProjectFromDatabaseDialogName = localize('updateProjectFromDatabaseDialogName', "Update project from database");
+export const updateProjectDialogOkButtonText = localize('updateProjectDialogOkButtonText', "Update");
+export const noScriptFiles = localize('noScriptFiles', "The target project folder does not include any .sql files to update.");
+export const projectToUpdatePlaceholderText = localize('projectToUpdatePlaceholderText', "Select location of project");
+export const ok = localize('Okay', 'Okay');
 
 // Error messages
 

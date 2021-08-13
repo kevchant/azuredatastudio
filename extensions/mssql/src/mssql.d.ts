@@ -42,6 +42,8 @@ export interface IExtension {
 
 	readonly dacFx: IDacFxService;
 
+	readonly updateLocalProject: IUpdateLocalProjectService;
+
 	readonly sqlAssessment: ISqlAssessmentService;
 
 	readonly sqlMigration: ISqlMigrationService;
@@ -326,6 +328,18 @@ export interface SchemaCompareOpenScmpResult extends azdata.ResultStatus {
 
 //#endregion
 
+//#region --- update local project
+export interface IUpdateLocalProjectService {
+	updateProjectFromDatabase(folderStructure: string, projectPath: string, ownerUri: string, version: string, taskExecutionMode: azdata.TaskExecutionMode): Thenable<UpdateLocalProjectResult>;
+}
+
+export interface UpdateLocalProjectResult extends azdata.ResultStatus {
+	addedFiles: string[];
+	deletedFiles: string[];
+	changedFiles: string[];
+}
+//#endregion
+
 //#region --- dacfx
 export const enum ExtractTarget {
 	dacpac = 0,
@@ -341,7 +355,6 @@ export interface IDacFxService {
 	importBacpac(packageFilePath: string, databaseName: string, ownerUri: string, taskExecutionMode: azdata.TaskExecutionMode): Thenable<DacFxResult>;
 	extractDacpac(databaseName: string, packageFilePath: string, applicationName: string, applicationVersion: string, ownerUri: string, taskExecutionMode: azdata.TaskExecutionMode): Thenable<DacFxResult>;
 	createProjectFromDatabase(databaseName: string, targetFilePath: string, applicationName: string, applicationVersion: string, ownerUri: string, extractTarget: ExtractTarget, taskExecutionMode: azdata.TaskExecutionMode): Thenable<DacFxResult>;
-	updateProjectFromDatabase(targetScripts: string [], sourceDatabase: string, version: string, taskExecutionMode: azdata.TaskExecutionMode): Thenable<DacFxResult>;
 	deployDacpac(packageFilePath: string, databaseName: string, upgradeExisting: boolean, ownerUri: string, taskExecutionMode: azdata.TaskExecutionMode, sqlCommandVariableValues?: Record<string, string>, deploymentOptions?: DeploymentOptions): Thenable<DacFxResult>;
 	generateDeployScript(packageFilePath: string, databaseName: string, ownerUri: string, taskExecutionMode: azdata.TaskExecutionMode, sqlCommandVariableValues?: Record<string, string>, deploymentOptions?: DeploymentOptions): Thenable<DacFxResult>;
 	generateDeployPlan(packageFilePath: string, databaseName: string, ownerUri: string, taskExecutionMode: azdata.TaskExecutionMode): Thenable<GenerateDeployPlanResult>;

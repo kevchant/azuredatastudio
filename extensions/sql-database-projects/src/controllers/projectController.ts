@@ -922,6 +922,12 @@ export class ProjectsController {
 		// TODO: Check for success; throw error
 	}
 
+	public setFilePath(model: ImportDataModel) {
+		if (model.extractTarget === mssql.ExtractTarget.file) {
+			model.filePath = path.join(model.filePath, `${model.projName}.sql`); // File extractTarget specifies the exact file rather than the containing folder
+		}
+	}
+
 	public async updateProjectFromDatabase(context: azdataType.IConnectionProfile | any): Promise<UpdateProjectFromDatabaseDialog> {
 		const profile = this.getConnectionProfileFromContext(context);
 		let updateProjectFromDatabaseDialog = this.getUpdateProjectFromDatabaseDialog(profile);
@@ -939,7 +945,7 @@ export class ProjectsController {
 
 	public async updateProjectFromDatabaseCallback(model: UpdateDataModel) {
 		try {
-			console.log(model);
+			await this.updateProjectFromDatabaseApiCall(model);
 		} catch (err) {
 			vscode.window.showErrorMessage(utils.getErrorMessage(err));
 		}
@@ -948,17 +954,12 @@ export class ProjectsController {
 	public async updateProjectFromDatabaseApiCall(model: UpdateDataModel): Promise<void> {
 		let ext = vscode.extensions.getExtension(mssql.extension.name)!;
 
-		const service = (await ext.activate() as mssql.IExtension).dacFx;
-		//const ownerUri = await utils.getAzdataApi()!.connection.getUriForConnection(model.serverId);
+		const service = (await ext.activate() as mssql.IExtension).updateLocalProject;
+		const ownerUri = await utils.getAzdataApi()!.connection.getUriForConnection(model.serverId);
 
-		await service.updateProjectFromDatabase(model.targetScripts, model.sourceDatabase, model.version, utils.getAzdataApi()!.TaskExecutionMode.execute);
-		// TODO: Check for success; throw error
-	}
+		const result: mssql.UpdateLocalProjectResult = await service.updateProjectFromDatabase(model.folderStructure, model.projectPath, ownerUri, model.version, utils.getAzdataApi()!.TaskExecutionMode.execute);
 
-	public setFilePath(model: ImportDataModel) {
-		if (model.extractTarget === mssql.ExtractTarget.file) {
-			model.filePath = path.join(model.filePath, `${model.projName}.sql`); // File extractTarget specifies the exact file rather than the containing folder
-		}
+		console.log(result);
 	}
 
 	private getConnectionProfileFromContext(context: azdataType.IConnectionProfile | any): azdataType.IConnectionProfile | undefined {
