@@ -330,7 +330,7 @@ export interface SchemaCompareOpenScmpResult extends azdata.ResultStatus {
 
 //#region --- update local project
 export interface IUpdateLocalProjectService {
-	updateProjectFromDatabase(folderStructure: string, projectPath: string, ownerUri: string, version: string, taskExecutionMode: azdata.TaskExecutionMode): Thenable<UpdateLocalProjectResult>;
+	updateProjectFromDatabase(folderStructure: string, projectPath: string, ownerUri: string, taskExecutionMode: azdata.TaskExecutionMode): Thenable<UpdateLocalProjectResult>;
 }
 
 export interface UpdateLocalProjectResult extends azdata.ResultStatus {

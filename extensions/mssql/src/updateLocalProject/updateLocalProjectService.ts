@@ -32,8 +32,8 @@ export class UpdateLocalProjectService implements mssql.IUpdateLocalProjectServi
 		context.registerService(constants.UpdateLocalProjectService, this);
 	}
 
-	public updateProjectFromDatabase(folderStructure: string, projectPath: string, ownerUri: string, version: string, taskExecutionMode: azdata.TaskExecutionMode): Thenable<mssql.UpdateLocalProjectResult> {
-		const params: contracts.UpdateLocalProjectParams = { folderStructure: folderStructure, projectPath: projectPath, ownerUri: ownerUri, version: version, taskExecutionMode: taskExecutionMode };
+	public updateProjectFromDatabase(folderStructure: string, projectPath: string, ownerUri: string, taskExecutionMode: azdata.TaskExecutionMode): Thenable<mssql.UpdateLocalProjectResult> {
+		const params: contracts.UpdateLocalProjectParams = { folderStructure: folderStructure, projectPath: projectPath, ownerUri: ownerUri, taskExecutionMode: taskExecutionMode };
 		return this.client.sendRequest(contracts.UpdateLocalProjectRequest.type, params).then(
 			undefined,
 			e => {

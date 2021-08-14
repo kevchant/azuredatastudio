@@ -308,12 +308,11 @@ export class UpdateProjectFromDatabaseDialog {
 	}
 
 	public async handleUpdateButtonClick(): Promise<void> {
-		// TODO: Find way to not hardcode folderStructure and version
+		// TODO: Find way to not hardcode folderStructure
 		const model: UpdateDataModel = {
 			folderStructure: 'test',
 			projectPath: this.projectLocationTextBox!.value!,
 			serverId: this.connectionId!,
-			version: 'SqlServer2016'
 		};
 
 		getAzdataApi()!.window.closeDialog(this.dialog);

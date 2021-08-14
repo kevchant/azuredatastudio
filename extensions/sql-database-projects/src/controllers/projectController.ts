@@ -957,7 +957,7 @@ export class ProjectsController {
 		const service = (await ext.activate() as mssql.IExtension).updateLocalProject;
 		const ownerUri = await utils.getAzdataApi()!.connection.getUriForConnection(model.serverId);
 
-		const result: mssql.UpdateLocalProjectResult = await service.updateProjectFromDatabase(model.folderStructure, model.projectPath, ownerUri, model.version, utils.getAzdataApi()!.TaskExecutionMode.execute);
+		const result: mssql.UpdateLocalProjectResult = await service.updateProjectFromDatabase(model.folderStructure, model.projectPath, ownerUri, utils.getAzdataApi()!.TaskExecutionMode.execute);
 
 		console.log(result);
 	}

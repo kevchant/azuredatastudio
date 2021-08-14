@@ -521,7 +521,6 @@ export interface UpdateLocalProjectParams {
 	folderStructure: string;
 	projectPath: string;
 	ownerUri: string;
-	version: string;
 	taskExecutionMode: TaskExecutionMode;
 }
 
