@@ -674,7 +674,7 @@ describe('BooksTreeViewTests', function () {
 	describe('BookTreeViewProvider.Commands', function () {
 		let rootFolderPath = path.join(os.tmpdir(), `BookTestData_${uuid.v4()}`);
 		let bookTreeViewProvider: BookTreeViewProvider;
-		let iterations = 100;
+		let iterations = 200;
 		SegFaultHandler.registerHandler("crash.log", function(signal, address, stack) {
 			console.log('CRAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASH');
 			console.log(stack);
@@ -785,7 +785,7 @@ describe('BooksTreeViewTests', function () {
 						should(showPreviewSpy.calledOnce).be.true('Should have called showPreviewFile.');
 					});
 
-					it('should add book when bookPath contains special characters on openBook', async () => {
+					it('should add book when bookPath contains special characters on openBook @UNSTABLE@', async () => {
 						let rootFolderPath2 = path.join(os.tmpdir(), `BookTestData(1)_${uuid.v4()}`);
 						let dataFolderPath2 = path.join(rootFolderPath2, '_data');
 						let contentFolderPath2 = path.join(rootFolderPath2, 'content');
