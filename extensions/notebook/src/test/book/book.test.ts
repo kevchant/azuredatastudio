@@ -677,7 +677,9 @@ describe('BooksTreeViewTests', function () {
 		let iterations = 200;
 		SegFaultHandler.registerHandler("crash.log", function(signal, address, stack) {
 			console.log('CRAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASH');
-			console.log(stack);
+			for(let entry of stack) {
+				console.log(entry);
+			}
 		});
 
 		let runs = [
