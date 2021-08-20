@@ -715,6 +715,7 @@ describe('BooksTreeViewTests', function () {
 			}
 		];
 		while(iterations--){
+			SegFaultHandler.causeSegfault();
 			runs.forEach(function (run) {
 				describe('BookTreeViewProvider.Commands on ' + run.it, function (): void {
 					before(async () => {

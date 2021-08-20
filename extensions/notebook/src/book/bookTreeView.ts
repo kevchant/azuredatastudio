@@ -23,6 +23,7 @@ import { CreateBookDialog } from '../dialog/createBookDialog';
 import { AddFileDialog } from '../dialog/addFileDialog';
 import { getContentPath } from './bookVersionHandler';
 import { TelemetryReporter, BookTelemetryView, NbTelemetryActions } from '../telemetry';
+import * as SegFaultHandler from 'segfault-handler';
 
 interface BookSearchResults {
 	notebookPaths: string[];
@@ -72,6 +73,12 @@ export class BookTreeViewProvider implements vscode.TreeDataProvider<BookTreeIte
 			}
 		});
 		this._extensionContext.subscriptions.push(azdata.nb.registerNavigationProvider(this));
+		SegFaultHandler.registerHandler('crash.log', function (signal, address, stack) {
+			console.log('CRAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASH');
+			for (let entry of stack) {
+				console.log(entry);
+			}
+		});
 	}
 
 	private async initialize(workspaceFolders: vscode.WorkspaceFolder[]): Promise<void> {
