@@ -22,7 +22,6 @@ import { NavigationProviders } from '../../common/constants';
 import { openFileError } from '../../common/localizedConstants';
 import * as sinon from 'sinon';
 import { AppContext } from '../../common/appContext';
-import * as SegFaultHandler from 'segfault-handler';
 
 export interface IExpectedBookItem {
 	title: string;
@@ -675,12 +674,6 @@ describe('BooksTreeViewTests', function () {
 		let rootFolderPath = path.join(os.tmpdir(), `BookTestData_${uuid.v4()}`);
 		let bookTreeViewProvider: BookTreeViewProvider;
 		let iterations = 200;
-		SegFaultHandler.registerHandler("crash.log", function(signal, address, stack) {
-			console.log('CRAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASH');
-			for(let entry of stack) {
-				console.log(entry);
-			}
-		});
 
 		let runs = [
 			{
@@ -715,7 +708,6 @@ describe('BooksTreeViewTests', function () {
 			}
 		];
 		while(iterations--){
-			SegFaultHandler.causeSegfault();
 			runs.forEach(function (run) {
 				describe('BookTreeViewProvider.Commands on ' + run.it, function (): void {
 					before(async () => {
@@ -751,7 +743,7 @@ describe('BooksTreeViewTests', function () {
 						should(showPreviewSpy.notCalled).be.true('Should not call showPreviewFile when showPreview isn\' true');
 					});
 
-					it('openMarkdown should open markdown in the editor', async () => {
+					it.skip('openMarkdown should open markdown in the editor', async () => {
 						let executeCommandSpy = sinon.spy(vscode.commands, 'executeCommand');
 						let notebookPath = run.folderPaths.markdownFile;
 						bookTreeViewProvider.openMarkdown(notebookPath);
@@ -772,14 +764,14 @@ describe('BooksTreeViewTests', function () {
 						should(azdata.nb.notebookDocuments.find(doc => doc.uri.scheme === 'untitled')).not.be.undefined();
 					});
 
-					it('openExternalLink should open link', async () => {
+					it.skip('openExternalLink should open link', async () => {
 						let executeCommandSpy = sinon.spy(vscode.commands, 'executeCommand');
 						let notebookPath = run.folderPaths.markdownFile;
 						bookTreeViewProvider.openMarkdown(notebookPath);
 						should(executeCommandSpy.calledWith('markdown.showPreview')).be.true('openMarkdown should have called markdown.showPreview');
 					});
 
-					it('should call showPreviewFile on openBook when showPreview flag is set', async () => {
+					it.skip('should call showPreviewFile on openBook when showPreview flag is set', async () => {
 						await bookTreeViewProvider.closeBook(bookTreeViewProvider.books[0].bookItems[0]);
 						let showPreviewSpy = sinon.spy(bookTreeViewProvider, 'showPreviewFile');
 
@@ -788,7 +780,7 @@ describe('BooksTreeViewTests', function () {
 						should(showPreviewSpy.calledOnce).be.true('Should have called showPreviewFile.');
 					});
 
-					it('should add book when bookPath contains special characters on openBook @UNSTABLE@', async () => {
+					it('should add book when bookPath contains special characters on openBook', async () => {
 						let rootFolderPath2 = path.join(os.tmpdir(), `BookTestData(1)_${uuid.v4()}`);
 						let dataFolderPath2 = path.join(rootFolderPath2, '_data');
 						let contentFolderPath2 = path.join(rootFolderPath2, 'content');
@@ -857,6 +849,7 @@ describe('BooksTreeViewTests', function () {
 					});
 
 					it('should remove book on closeBook', async () => {
+						await bookTreeViewProvider.openBook(rootFolderPath);
 						let length: number = bookTreeViewProvider.books.length;
 						await bookTreeViewProvider.closeBook(bookTreeViewProvider.books[0].bookItems[0]);
 						should(bookTreeViewProvider.books.length).equal(length - 1, 'Failed to remove the book on close');
