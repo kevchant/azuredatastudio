@@ -81,14 +81,34 @@ export class SchemaCompareMainWindow {
 		this.editor = azdata.workspace.createModelViewEditor(loc.SchemaCompareLabel, { retainContextWhenHidden: true, supportsSave: true, resourceName: schemaCompareResourceName }, 'SchemaCompareEditor');
 	}
 
-	// schema compare can get started with three contexts for the source:
+	// schema compare can get started with four contexts for the source:
 	// 1. undefined
 	// 2. connection profile
 	// 3. dacpac
-	public async start(context: any): Promise<void> {
-		// if schema compare was launched from a db, set that as the source
-		let profile = context ? <azdata.IConnectionProfile>context.connectionProfile : undefined;
-		let sourceDacpac = context as string;
+	// 4. database project
+	// 5. .scmp file
+	public async start(context: any, targetEndpointInfo: any = null): Promise<void> {
+		const targetIsSet: boolean = targetEndpointInfo as mssql.SchemaCompareEndpointInfo && (targetEndpointInfo as mssql.SchemaCompareEndpointInfo).endpointType === mssql.SchemaCompareEndpointType.Project;
+
+		// if schema compare was launched from a db or a connection profile, set that as the source
+		let profile: azdata.IConnectionProfile;
+
+		if (targetIsSet) {
+			profile = context;
+			this.targetEndpointInfo = targetEndpointInfo;
+		} else {
+			profile = context ? <azdata.IConnectionProfile>context.connectionProfile : undefined;
+		}
+
+		let sourceDacpac = undefined;
+		let sourceProject = undefined;
+
+		if (!profile && context as string && (context as string).endsWith('.dacpac')) {
+			sourceDacpac = context as string;
+		} else if (!profile) {
+			sourceProject = context as string;
+		}
+
 		if (profile) {
 			let ownerUri = await azdata.connection.getUriForConnection((profile.id));
 			let usr = profile.userName;
@@ -98,23 +118,45 @@ export class SchemaCompareMainWindow {
 
 			this.sourceEndpointInfo = {
 				endpointType: mssql.SchemaCompareEndpointType.Database,
+				packageFilePath: '',
 				serverDisplayName: `${profile.serverName} (${usr})`,
 				serverName: profile.serverName,
 				databaseName: profile.databaseName,
 				ownerUri: ownerUri,
-				packageFilePath: '',
 				connectionDetails: undefined,
-				connectionName: profile.connectionName
+				connectionName: profile.connectionName,
+				projectFilePath: '',
+				targetScripts: [],
+				dsp: '',
+				folderStructure: ''
 			};
 		} else if (sourceDacpac) {
 			this.sourceEndpointInfo = {
 				endpointType: mssql.SchemaCompareEndpointType.Dacpac,
+				packageFilePath: sourceDacpac,
 				serverDisplayName: '',
 				serverName: '',
 				databaseName: '',
 				ownerUri: '',
-				packageFilePath: sourceDacpac,
-				connectionDetails: undefined
+				connectionDetails: undefined,
+				projectFilePath: '',
+				targetScripts: [],
+				dsp: '',
+				folderStructure: ''
+			};
+		} else if (sourceProject) {
+			this.sourceEndpointInfo = {
+				endpointType: mssql.SchemaCompareEndpointType.Project,
+				packageFilePath: '',
+				serverDisplayName: '',
+				serverName: '',
+				databaseName: '',
+				ownerUri: '',
+				connectionDetails: undefined,
+				projectFilePath: sourceProject,
+				targetScripts: [],
+				dsp: undefined,
+				folderStructure: ''
 			};
 		}
 
@@ -123,6 +165,10 @@ export class SchemaCompareMainWindow {
 			this.registerContent(),
 			this.editor.openEditor()
 		]);
+
+		if (targetIsSet) {
+			await this.execute();
+		}
 	}
 
 	private async registerContent(): Promise<void> {
@@ -162,7 +208,8 @@ export class SchemaCompareMainWindow {
 				this.createSourceAndTargetButtons();
 
 				this.sourceName = getEndpointName(this.sourceEndpointInfo);
-				this.targetName = ' ';
+				this.targetName = getEndpointName(this.targetEndpointInfo);
+
 				this.sourceNameComponent = this.view.modelBuilder.inputBox().withProps({
 					value: this.sourceName,
 					title: this.sourceName,
@@ -359,9 +406,15 @@ export class SchemaCompareMainWindow {
 			// only enable generate script button if the target is a db
 			if (this.targetEndpointInfo.endpointType === mssql.SchemaCompareEndpointType.Database) {
 				this.generateScriptButton.enabled = true;
-				this.applyButton.enabled = true;
 			} else {
 				this.generateScriptButton.title = loc.generateScriptDisabled;
+			}
+
+			// only enable apply button if the target is a db or a project
+			if (this.targetEndpointInfo.endpointType === mssql.SchemaCompareEndpointType.Database ||
+				this.targetEndpointInfo.endpointType === mssql.SchemaCompareEndpointType.Project) {
+				this.applyButton.enabled = true;
+			} else {
 				this.applyButton.title = loc.applyDisabled;
 			}
 		} else {
@@ -766,7 +819,23 @@ export class SchemaCompareMainWindow {
 				this.setButtonsForRecompare();
 
 				const service = await this.getService();
-				const result = await service.schemaComparePublishChanges(this.comparisonResult.operationId, this.targetEndpointInfo.serverName, this.targetEndpointInfo.databaseName, azdata.TaskExecutionMode.execute);
+
+				let result = undefined;
+
+				if (this.targetEndpointInfo.endpointType === mssql.SchemaCompareEndpointType.Database) {
+					result = await service.schemaComparePublishDatabaseChanges(this.comparisonResult.operationId, this.targetEndpointInfo.serverName, this.targetEndpointInfo.databaseName, azdata.TaskExecutionMode.execute);
+				} else {
+					if (!vscode.extensions.getExtension(loc.sqlDatabaseProjectExtensionId)) {
+						await vscode.window.showErrorMessage(loc.noProjectExtensionApply);
+						return;
+					} else {
+						result = await vscode.commands.executeCommand(loc.sqlDatabaseProjectsPublishChanges, this.comparisonResult.operationId, this.targetEndpointInfo.projectFilePath, this.targetEndpointInfo.folderStructure);
+						if (!result.success) {
+							await vscode.window.showErrorMessage(loc.applyError);
+						}
+					}
+				}
+
 				if (!result || !result.success) {
 					TelemetryReporter.createErrorEvent(TelemetryViews.SchemaCompareMainWindow, 'SchemaCompareApplyFailed', undefined, getTelemetryErrorType(result.errorMessage))
 						.withAdditionalProperties({
@@ -785,6 +854,11 @@ export class SchemaCompareMainWindow {
 						'endTime': Date.now().toString(),
 						'operationId': this.comparisonResult.operationId
 					}).send();
+
+				if (this.targetEndpointInfo.endpointType === mssql.SchemaCompareEndpointType.Project) {
+					vscode.commands.executeCommand(loc.sqlDatabaseProjectsShowProjectsView);
+					await vscode.window.showInformationMessage(loc.applySuccess);
+				}
 			}
 		});
 	}
@@ -930,6 +1004,9 @@ export class SchemaCompareMainWindow {
 
 	public async openScmp(): Promise<void> {
 		TelemetryReporter.sendActionEvent(TelemetryViews.SchemaCompareMainWindow, 'SchemaCompareOpenScmpStarted');
+
+		let fileUri;
+
 		const rootPath = getRootPath();
 		let fileUris = await vscode.window.showOpenDialog(
 			{
@@ -948,7 +1025,8 @@ export class SchemaCompareMainWindow {
 			return;
 		}
 
-		let fileUri = fileUris[0];
+		fileUri = fileUris[0];
+
 		const service = await this.getService();
 		let startTime = Date.now();
 		const result = await service.schemaCompareOpenScmp(fileUri.fsPath);
@@ -1072,10 +1150,13 @@ export class SchemaCompareMainWindow {
 
 	private setButtonStatesForNoChanges(enableButtons: boolean): void {
 		// generate script and apply can only be enabled if the target is a database
-		if (this.targetEndpointInfo.endpointType === mssql.SchemaCompareEndpointType.Database) {
+		if (this.targetEndpointInfo.endpointType === mssql.SchemaCompareEndpointType.Database ||
+			this.targetEndpointInfo.endpointType === mssql.SchemaCompareEndpointType.Project) {
 			this.applyButton.enabled = enableButtons;
-			this.generateScriptButton.enabled = enableButtons;
 			this.applyButton.title = enableButtons ? loc.applyEnabledMessage : loc.applyNoChangesMessage;
+		}
+		if (this.targetEndpointInfo.endpointType === mssql.SchemaCompareEndpointType.Database) {
+			this.generateScriptButton.enabled = enableButtons;
 			this.generateScriptButton.title = enableButtons ? loc.generateScriptEnabledMessage : loc.generateScriptNoChangesMessage;
 		}
 	}

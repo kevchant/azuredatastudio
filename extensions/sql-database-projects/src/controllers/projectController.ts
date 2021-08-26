@@ -17,14 +17,14 @@ import type * as mssqlVscode from 'vscode-mssql';
 
 import { promises as fs } from 'fs';
 import { PublishDatabaseDialog } from '../dialogs/publishDatabaseDialog';
-import { Project, reservedProjectFolders, FileProjectEntry, SqlProjectReferenceProjectEntry, IDatabaseReferenceProjectEntry } from '../models/project';
+import { Project, reservedProjectFolders, FileProjectEntry, SqlProjectReferenceProjectEntry, IDatabaseReferenceProjectEntry, EntryType } from '../models/project';
 import { SqlDatabaseProjectTreeViewProvider } from './databaseProjectTreeViewProvider';
 import { FolderNode, FileNode } from '../models/tree/fileFolderTreeItem';
 import { IDeploySettings } from '../models/IDeploySettings';
 import { BaseProjectTreeItem } from '../models/tree/baseTreeItem';
 import { ProjectRootTreeItem } from '../models/tree/projectTreeItem';
 import { ImportDataModel } from '../models/api/import';
-import { UpdateDataModel } from '../models/api/update';
+import { UpdateDataModel, UpdateAction } from '../models/api/update';
 import { NetCoreTool, DotNetCommandOptions } from '../tools/netcoreTool';
 import { BuildHelper } from '../tools/buildHelper';
 import { readPublishProfile } from '../models/publishProfile/publishProfile';
@@ -183,18 +183,20 @@ export class ProjectsController {
 
 	/**
 	 * Builds a project, producing a dacpac
-	 * @param treeNode a treeItem in a project's hierarchy, to be used to obtain a Project
-	 * @returns path of the built dacpac
-	 */
-	public async buildProject(treeNode: dataworkspace.WorkspaceTreeItem): Promise<string>;
-	/**
-	 * Builds a project, producing a dacpac
 	 * @param project Project to be built
 	 * @returns path of the built dacpac
 	 */
 	public async buildProject(project: Project): Promise<string>;
+
+	/**
+	 * Builds a project, producing a dacpac
+	 * @param treeNode a treeItem in a project's hierarchy, to be used to obtain a Project
+	 * @returns path of the built dacpac
+	 */
+	public async buildProject(treeNode: dataworkspace.WorkspaceTreeItem): Promise<string>;
+
 	public async buildProject(context: Project | dataworkspace.WorkspaceTreeItem): Promise<string> {
-		const project: Project = this.getProjectFromContext(context);
+		let project: Project = this.getProjectFromContext(context);
 
 		const startTime = new Date();
 		const currentBuildTimeInfo = `${startTime.toLocaleDateString()} ${constants.at} ${startTime.toLocaleTimeString()}`;
@@ -367,18 +369,22 @@ export class ProjectsController {
 		return result;
 	}
 
-	public async schemaCompare(treeNode: dataworkspace.WorkspaceTreeItem): Promise<void> {
+	public async schemaCompare(source: dataworkspace.WorkspaceTreeItem | azdataType.IConnectionProfile, targetParam: any = null): Promise<void> {
 		try {
 			// check if schema compare extension is installed
 			if (vscode.extensions.getExtension(constants.schemaCompareExtensionId)) {
-				// build project
-				const dacpacPath = await this.buildProject(treeNode);
+				let sourceParam;
 
-				// check that dacpac exists
-				if (await utils.exists(dacpacPath)) {
-					TelemetryReporter.sendActionEvent(TelemetryViews.ProjectController, TelemetryActions.projectSchemaCompareCommandInvoked);
-					await vscode.commands.executeCommand(constants.schemaCompareStartCommand, dacpacPath);
+				if (source as dataworkspace.WorkspaceTreeItem) {
+					sourceParam = this.getProjectFromContext(source as dataworkspace.WorkspaceTreeItem).projectFolderPath;
 				} else {
+					sourceParam = source as azdataType.IConnectionProfile;
+				}
+
+				try {
+					TelemetryReporter.sendActionEvent(TelemetryViews.ProjectController, TelemetryActions.projectSchemaCompareCommandInvoked);
+					await vscode.commands.executeCommand(constants.schemaCompareStartCommand, sourceParam, targetParam);
+				} catch (e) {
 					throw new Error(constants.buildFailedCannotStartSchemaCompare);
 				}
 			} else {
@@ -398,6 +404,59 @@ export class ProjectsController {
 
 			vscode.window.showErrorMessage(utils.getErrorMessage(err));
 		}
+	}
+
+	public async schemaCompareGetTargetScripts(projectFilePath: string): Promise<string[]> {
+		const project = await Project.openProject(projectFilePath);
+		let files: string[] = [];
+
+		const fileEntries: FileProjectEntry[] = project.files;
+
+		fileEntries.forEach(f => {
+
+			if (f.fsUri.fsPath.endsWith('.sql')) {
+				files.push(f.fsUri.fsPath);
+			}
+		});
+
+		return files;
+	}
+
+	public async schemaCompareGetDsp(projectFilePath: string): Promise<string> {
+		const project = await Project.openProject(projectFilePath);
+		return project.getProjectTargetVersion();
+	}
+
+	public async schemaComparePublishProjectChanges(operationId: string, projectFilePath: string, folderStructure: string): Promise<mssql.SchemaComparePublishProjectResult> {
+		let ext = vscode.extensions.getExtension(mssql.extension.name)!;
+		const service = (await ext.activate() as mssql.IExtension).schemaCompare;
+
+		const projectPath = path.dirname(projectFilePath);
+
+		const result: mssql.SchemaComparePublishProjectResult = await service.schemaComparePublishProjectChanges(operationId, projectPath, folderStructure, utils.getAzdataApi()!.TaskExecutionMode.execute);
+
+		const project = await Project.openProject(projectFilePath);
+
+		let toAdd: vscode.Uri[] = [];
+		result.addedFiles.forEach(f => toAdd.push(vscode.Uri.file(f)));
+		await project.addToProject(toAdd);
+
+		let toRemove: vscode.Uri[] = [];
+		result.deletedFiles.forEach(f => toRemove.push(vscode.Uri.file(f)));
+
+		let toRemoveEntries: FileProjectEntry[] = [];
+		toRemove.forEach(f => toRemoveEntries.push(new FileProjectEntry(f, f.path.replace(projectPath + '\\', ''), EntryType.File)));
+
+		toRemoveEntries.forEach(async f => await project.exclude(f));
+
+		await this.buildProject(project);
+
+		return result;
+	}
+
+	public async schemaCompareShowProjectsView() {
+		const workspaceApi = utils.getDataWorkspaceExtensionApi();
+		workspaceApi.showProjectsView();
 	}
 
 	public async addFolderPrompt(treeNode: dataworkspace.WorkspaceTreeItem): Promise<void> {
@@ -928,9 +987,9 @@ export class ProjectsController {
 		}
 	}
 
-	public async updateProjectFromDatabase(context: azdataType.IConnectionProfile | any): Promise<UpdateProjectFromDatabaseDialog> {
-		const profile = this.getConnectionProfileFromContext(context);
-		let updateProjectFromDatabaseDialog = this.getUpdateProjectFromDatabaseDialog(profile);
+	public async updateProjectFromDatabase(context: azdataType.IConnectionProfile | dataworkspace.WorkspaceTreeItem): Promise<UpdateProjectFromDatabaseDialog> {
+		const dialogParam = context.hasOwnProperty('connectionProfile') ? this.getConnectionProfileFromContext(context) : this.getProjectFromContext(context as dataworkspace.WorkspaceTreeItem);
+		let updateProjectFromDatabaseDialog = this.getUpdateProjectFromDatabaseDialog(dialogParam as azdataType.IConnectionProfile | Project);
 
 		updateProjectFromDatabaseDialog.updateProjectFromDatabaseCallback = async (model) => await this.updateProjectFromDatabaseCallback(model);
 
@@ -939,8 +998,8 @@ export class ProjectsController {
 		return updateProjectFromDatabaseDialog;
 	}
 
-	public getUpdateProjectFromDatabaseDialog(profile: azdataType.IConnectionProfile | undefined): UpdateProjectFromDatabaseDialog {
-		return new UpdateProjectFromDatabaseDialog(profile);
+	public getUpdateProjectFromDatabaseDialog(dialogParam: azdataType.IConnectionProfile | Project): UpdateProjectFromDatabaseDialog {
+		return new UpdateProjectFromDatabaseDialog(dialogParam);
 	}
 
 	public async updateProjectFromDatabaseCallback(model: UpdateDataModel) {
@@ -953,13 +1012,66 @@ export class ProjectsController {
 
 	public async updateProjectFromDatabaseApiCall(model: UpdateDataModel): Promise<void> {
 		let ext = vscode.extensions.getExtension(mssql.extension.name)!;
+		const service = (await ext.activate() as mssql.IExtension).schemaCompare;
+		const deploymentOptions = await service.schemaCompareGetDefaultOptions();
+		const operationId = this.generateComparisonGuid();
 
-		const service = (await ext.activate() as mssql.IExtension).updateLocalProject;
-		const ownerUri = await utils.getAzdataApi()!.connection.getUriForConnection(model.serverId);
+		model.targetEndpointInfo.targetScripts = await this.schemaCompareGetTargetScripts(model.targetEndpointInfo.projectFilePath);
+		model.targetEndpointInfo.dsp = await this.schemaCompareGetDsp(model.targetEndpointInfo.projectFilePath);
 
-		const result: mssql.UpdateLocalProjectResult = await service.updateProjectFromDatabase(model.folderStructure, model.projectPath, ownerUri, utils.getAzdataApi()!.TaskExecutionMode.execute);
+		const result: mssql.SchemaCompareResult = await service.schemaCompare(
+			operationId, model.sourceEndpointInfo, model.targetEndpointInfo, utils.getAzdataApi()!.TaskExecutionMode.execute, deploymentOptions.defaultDeploymentOptions
+		);
 
-		console.log(result);
+		if (result.areEqual) {
+			await vscode.window.showInformationMessage(constants.equalComparison);
+			return;
+		}
+
+		if (model.action === UpdateAction.Update) {
+			const publishResult = await this.schemaComparePublishProjectChanges(
+				operationId, model.targetEndpointInfo.projectFilePath, model.targetEndpointInfo.folderStructure
+			);
+
+			if (publishResult.success) {
+				await vscode.window.showInformationMessage(constants.applySuccess);
+			} else {
+				await vscode.window.showErrorMessage(constants.applyError);
+			}
+
+			this.schemaCompareShowProjectsView();
+
+		} else if (model.action === UpdateAction.Compare) {
+			await vscode.commands.executeCommand(constants.schemaCompareStartCommand,
+				model.sourceEndpointInfo.connectionDetails,
+				model.targetEndpointInfo);
+		}
+	}
+
+	private generateComparisonGuid(): string {
+		let hexValues: string[] = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'];
+
+		// c.f. rfc4122 (UUID version 4 = xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx)
+		let oct: string = '';
+		let tmp: number;
+
+		/* tslint:disable:no-bitwise */
+		for (let a: number = 0; a < 4; a++) {
+			tmp = (4294967296 * Math.random()) | 0;
+			oct += hexValues[tmp & 0xF] +
+				hexValues[tmp >> 4 & 0xF] +
+				hexValues[tmp >> 8 & 0xF] +
+				hexValues[tmp >> 12 & 0xF] +
+				hexValues[tmp >> 16 & 0xF] +
+				hexValues[tmp >> 20 & 0xF] +
+				hexValues[tmp >> 24 & 0xF] +
+				hexValues[tmp >> 28 & 0xF];
+		}
+
+		// 'Set the two most significant bits (bits 6 and 7) of the clock_seq_hi_and_reserved to zero and one, respectively'
+		let clockSequenceHi: string = hexValues[8 + (Math.random() * 4) | 0];
+		return oct.substr(0, 8) + '-' + oct.substr(9, 4) + '-4' + oct.substr(13, 3) + '-' + clockSequenceHi + oct.substr(16, 3) + '-' + oct.substr(19, 12);
+		/* tslint:enable:no-bitwise */
 	}
 
 	private getConnectionProfileFromContext(context: azdataType.IConnectionProfile | any): azdataType.IConnectionProfile | undefined {

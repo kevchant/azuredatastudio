@@ -4,33 +4,46 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as vscode from 'vscode';
-import type * as azdataType from 'azdata';
+import * as mssql from '../../../mssql';
+import * as azdata from 'azdata';
 import * as constants from '../common/constants';
 import * as newProjectTool from '../tools/newProjectTool';
-
-import { getConnectionName } from './utils';
 import { Deferred } from '../common/promise';
+import { Project } from '../models/project';
 import { cssStyles } from '../common/uiConstants';
 import { IconPathHelper } from '../common/iconHelper';
-import { UpdateDataModel } from '../models/api/update';
+import { UpdateDataModel, UpdateAction } from '../models/api/update';
 import { exists, getAzdataApi, getDataWorkspaceExtensionApi } from '../common/utils';
+import path = require('path');
 
 export class UpdateProjectFromDatabaseDialog {
-	public dialog: azdataType.window.Dialog;
-	public updateProjectFromDatabaseTab: azdataType.window.DialogTab;
-	public sourceConnectionTextBox: azdataType.InputBoxComponent | undefined;
-	private selectConnectionButton: azdataType.ButtonComponent | undefined;
-	public sourceDatabaseDropDown: azdataType.DropDownComponent | undefined;
-	public projectLocationTextBox: azdataType.InputBoxComponent | undefined;
-	private formBuilder: azdataType.FormBuilder | undefined;
+	public dialog: azdata.window.Dialog;
+	private updateProjectFromDatabaseTab: azdata.window.DialogTab;
+	private serverDropdown: azdata.DropDownComponent | undefined;
+	private connectionButton: azdata.ButtonComponent | undefined;
+	private databaseDropdown: azdata.DropDownComponent | undefined;
+	private projectFileTextBox: azdata.InputBoxComponent | undefined;
+	private folderStructureDropDown: azdata.DropDownComponent | undefined;
+	private compareActionRadioButton: azdata.RadioButtonComponent | undefined;
+	private updateActionRadioButton: azdata.RadioButtonComponent | undefined;
+	private formBuilder: azdata.FormBuilder | undefined;
 	private connectionId: string | undefined;
+	private profile: azdata.IConnectionProfile | undefined;
+	private project: Project | undefined;
+	private action: UpdateAction | undefined;
 	private toDispose: vscode.Disposable[] = [];
 	private initDialogComplete!: Deferred<void>;
 	private initDialogPromise: Promise<void> = new Promise<void>((resolve, reject) => this.initDialogComplete = { resolve, reject });
 
 	public updateProjectFromDatabaseCallback: ((model: UpdateDataModel) => any) | undefined;
 
-	constructor(private profile: azdataType.IConnectionProfile | undefined) {
+	constructor(dialogParam: azdata.IConnectionProfile | Project) {
+		if (dialogParam.hasOwnProperty('connectionName')) {
+			this.profile = dialogParam as azdata.IConnectionProfile;
+		} else {
+			this.project = dialogParam as Project;
+		}
+
 		this.dialog = getAzdataApi()!.window.createModelViewDialog(constants.updateProjectFromDatabaseDialogName, 'updateProjectFromDatabaseDialog');
 		this.updateProjectFromDatabaseTab = getAzdataApi()!.window.createTab(constants.updateProjectFromDatabaseDialogName);
 		this.dialog.registerCloseValidator(async () => {
@@ -39,7 +52,13 @@ export class UpdateProjectFromDatabaseDialog {
 	}
 
 	public async openDialog(): Promise<void> {
+		let connection = await azdata.connection.getCurrentConnection();
+		if (connection) {
+			this.connectionId = connection.connectionId;
+		}
+
 		this.initializeDialog();
+
 		this.dialog.okButton.label = constants.updateProjectDialogOkButtonText;
 		this.dialog.okButton.enabled = false;
 		this.toDispose.push(this.dialog.okButton.onClick(async () => await this.handleUpdateButtonClick()));
@@ -48,10 +67,6 @@ export class UpdateProjectFromDatabaseDialog {
 
 		getAzdataApi()!.window.openDialog(this.dialog);
 		await this.initDialogPromise;
-
-		if (this.profile) {
-			await this.updateConnectionComponents(getConnectionName(this.profile), this.profile.id, this.profile.databaseName!);
-		}
 
 		this.tryEnableUpdateButton();
 	}
@@ -68,16 +83,21 @@ export class UpdateProjectFromDatabaseDialog {
 	private initializeUpdateProjectFromDatabaseTab(): void {
 		this.updateProjectFromDatabaseTab.registerContent(async view => {
 
-			const connectionRow = this.createConnectionRow(view);
+			const connectionRow = this.createServerRow(view);
 			const databaseRow = this.createDatabaseRow(view);
 			const sourceDatabaseFormSection = view.modelBuilder.flexContainer().withLayout({ flexFlow: 'column' }).component();
 			sourceDatabaseFormSection.addItems([connectionRow, databaseRow]);
 
 			const projectLocationRow = this.createProjectLocationRow(view);
+			const folderStructureRow = this.createFolderStructureRow(view);
 			const targetProjectFormSection = view.modelBuilder.flexContainer().withLayout({ flexFlow: 'column' }).component();
-			targetProjectFormSection.addItems([projectLocationRow]);
+			targetProjectFormSection.addItems([projectLocationRow, folderStructureRow]);
 
-			this.formBuilder = <azdataType.FormBuilder>view.modelBuilder.formContainer()
+			const actionRow = this.createActionRow(view);
+			const actionFormSection = view.modelBuilder.flexContainer().withLayout({ flexFlow: 'column' }).component();
+			actionFormSection.addItems([actionRow]);
+
+			this.formBuilder = <azdata.FormBuilder>view.modelBuilder.formContainer()
 				.withFormItems([
 					{
 						title: constants.sourceDatabase,
@@ -95,6 +115,14 @@ export class UpdateProjectFromDatabaseDialog {
 							}
 						]
 					},
+					{
+						title: constants.updateAction,
+						components: [
+							{
+								component: actionFormSection,
+							}
+						]
+					}
 				], {
 					horizontal: false,
 					titleFontSize: cssStyles.titleFontSize
@@ -106,14 +134,13 @@ export class UpdateProjectFromDatabaseDialog {
 
 			let formModel = this.formBuilder.component();
 			await view.initializeModel(formModel);
-			this.selectConnectionButton?.focus();
+			this.connectionButton?.focus();
 			this.initDialogComplete?.resolve();
 		});
 	}
 
-	private createConnectionRow(view: azdataType.ModelView): azdataType.FlexContainer {
-		const sourceConnectionTextBox = this.createSourceConnectionComponent(view);
-		const selectConnectionButton: azdataType.Component = this.createSelectConnectionButton(view);
+	private createServerRow(view: azdata.ModelView): azdata.FlexContainer {
+		this.createServerComponent(view);
 
 		const serverLabel = view.modelBuilder.text().withProps({
 			value: constants.server,
@@ -121,22 +148,14 @@ export class UpdateProjectFromDatabaseDialog {
 			width: cssStyles.updateProjectFromDatabaseLabelWidth
 		}).component();
 
-		const connectionRow = view.modelBuilder.flexContainer().withItems([serverLabel, sourceConnectionTextBox], { flex: '0 0 auto', CSSStyles: { 'margin-right': '10px', 'margin-bottom': '-5px', 'margin-top': '-10px' } }).withLayout({ flexFlow: 'row', alignItems: 'center' }).component();
-		connectionRow.addItem(selectConnectionButton, { CSSStyles: { 'margin-right': '0px', 'margin-bottom': '-5px', 'margin-top': '-10px' } });
+		const connectionRow = view.modelBuilder.flexContainer().withItems([serverLabel, this.serverDropdown!], { flex: '0 0 auto', CSSStyles: { 'margin-right': '10px', 'margin-bottom': '-5px', 'margin-top': '-10px' } }).withLayout({ flexFlow: 'row', alignItems: 'center' }).component();
+		connectionRow.addItem(this.connectionButton!, { CSSStyles: { 'margin-right': '0px', 'margin-bottom': '-5px', 'margin-top': '-10px' } });
 
 		return connectionRow;
 	}
 
-	private createDatabaseRow(view: azdataType.ModelView): azdataType.FlexContainer {
-		this.sourceDatabaseDropDown = view.modelBuilder.dropDown().withProps({
-			ariaLabel: constants.databaseNameLabel,
-			required: true,
-			width: cssStyles.updateProjectFromDatabaseTextboxWidth
-		}).component();
-
-		this.sourceDatabaseDropDown.onValueChanged(() => {
-			this.tryEnableUpdateButton();
-		});
+	private createDatabaseRow(view: azdata.ModelView): azdata.FlexContainer {
+		this.createDatabaseComponent(view);
 
 		const databaseLabel = view.modelBuilder.text().withProps({
 			value: constants.databaseNameLabel,
@@ -144,91 +163,207 @@ export class UpdateProjectFromDatabaseDialog {
 			width: cssStyles.updateProjectFromDatabaseLabelWidth
 		}).component();
 
-		const databaseRow = view.modelBuilder.flexContainer().withItems([databaseLabel, <azdataType.DropDownComponent>this.sourceDatabaseDropDown], { flex: '0 0 auto', CSSStyles: { 'margin-right': '10px', 'margin-bottom': '-10px' } }).withLayout({ flexFlow: 'row', alignItems: 'center' }).component();
+		const databaseRow = view.modelBuilder.flexContainer().withItems([databaseLabel, <azdata.DropDownComponent>this.databaseDropdown!], { flex: '0 0 auto', CSSStyles: { 'margin-right': '10px', 'margin-bottom': '-10px' } }).withLayout({ flexFlow: 'row', alignItems: 'center' }).component();
 
 		return databaseRow;
 	}
 
-	private createSourceConnectionComponent(view: azdataType.ModelView): azdataType.InputBoxComponent {
-		this.sourceConnectionTextBox = view.modelBuilder.inputBox().withProps({
-			value: '',
-			placeHolder: constants.selectConnection,
-			width: cssStyles.updateProjectFromDatabaseTextboxWidth,
-			enabled: false
+	private createServerComponent(view: azdata.ModelView) {
+		this.serverDropdown = view.modelBuilder.dropDown().withProps({
+			editable: true,
+			fireOnTextChange: true,
+			width: cssStyles.updateProjectFromDatabaseTextboxWidth
 		}).component();
 
-		this.sourceConnectionTextBox.onTextChanged(() => {
+		this.createConnectionButton(view);
+
+		this.serverDropdown.onValueChanged(() => {
 			this.tryEnableUpdateButton();
 		});
 
-		return this.sourceConnectionTextBox;
+		this.populateServerDropdown();
 	}
 
-	private createSelectConnectionButton(view: azdataType.ModelView): azdataType.Component {
-		this.selectConnectionButton = view.modelBuilder.button().withProps({
-			ariaLabel: constants.selectConnection,
-			iconPath: IconPathHelper.selectConnection,
-			height: '16px',
-			width: '16px'
+	private createDatabaseComponent(view: azdata.ModelView) {
+		this.databaseDropdown = view.modelBuilder.dropDown().withProps({
+			editable: true,
+			fireOnTextChange: true,
+			width: cssStyles.updateProjectFromDatabaseTextboxWidth
 		}).component();
 
-		this.selectConnectionButton.onDidClick(async () => {
-			let connection = await getAzdataApi()!.connection.openConnectionDialog();
-			this.connectionId = connection.connectionId;
+		this.databaseDropdown.onValueChanged(() => {
+			this.tryEnableUpdateButton();
+		});
+	}
 
-			let connectionTextboxValue: string;
-			connectionTextboxValue = getConnectionName(connection);
+	private async populateServerDropdown() {
+		this.serverDropdown!.loading = true;
+		const values = await this.getServerValues();
 
-			await this.updateConnectionComponents(connectionTextboxValue, this.connectionId, connection.options.database);
+		if (values && values.length > 0) {
+			await this.serverDropdown!.updateProperties({
+				values: values,
+				value: values[0]
+			});
+		}
+
+		this.serverDropdown!.loading = false;
+
+		if (this.serverDropdown!.value) {
+			await this.populateDatabaseDropdown();
+		}
+	}
+
+	protected async populateDatabaseDropdown() {
+		const connectionProfile = (this.serverDropdown!.value as ConnectionDropdownValue).connection;
+
+		this.databaseDropdown!.loading = true;
+
+		await this.databaseDropdown!.updateProperties({
+			values: [],
+			value: undefined
 		});
 
-		return this.selectConnectionButton;
+		let values = [];
+		try {
+			values = await this.getDatabaseValues(connectionProfile.connectionId);
+		} catch (e) {
+			// if the user doesn't have access to master, just set the database of the connection profile
+			values = [connectionProfile.databaseName];
+			console.warn(e);
+		}
+
+		if (values && values.length > 0) {
+			await this.databaseDropdown!.updateProperties({
+				values: values,
+				value: values[0],
+			});
+		}
+
+		this.databaseDropdown!.loading = false;
 	}
 
-	private async updateConnectionComponents(connectionTextboxValue: string, connectionId: string, databaseName?: string) {
-		this.sourceConnectionTextBox!.value = connectionTextboxValue;
-		this.sourceConnectionTextBox!.updateProperty('title', connectionTextboxValue);
+	private async getServerValues() {
+		let cons = await azdata.connection.getConnections(/* activeConnectionsOnly */ true);
 
-		// populate database dropdown with the databases for this connection
-		if (connectionId) {
-			this.sourceDatabaseDropDown!.loading = true;
-			let databaseValues;
-			try {
-				databaseValues = (await getAzdataApi()!.connection.listDatabases(connectionId))
-					// filter out system dbs
-					.filter(db => !constants.systemDbs.includes(db));
-			} catch (e) {
-				// if the user doesn't have access to master, just set the database of the connection profile
-				databaseValues = [databaseName!];
-				console.warn(e);
+		// This user has no active connections
+		if (!cons || cons.length === 0) {
+			return undefined;
+		}
+
+		// Update connection icon to "connected" state
+		this.connectionButton!.iconPath = IconPathHelper.connect;
+
+		// reverse list so that most recent connections are first
+		cons.reverse();
+
+		let count = -1;
+		let idx = -1;
+		let values = cons.map(c => {
+			count++;
+
+			let usr = c.options.user;
+
+			if (!usr) {
+				usr = constants.defaultUser;
 			}
 
-			this.sourceDatabaseDropDown!.values = databaseValues;
-			this.sourceDatabaseDropDown!.loading = false;
-			this.connectionId = connectionId;
+			let srv = c.options.server;
+
+			let finalName = `${srv} (${usr})`;
+
+			if (c.options.connectionName) {
+				finalName = c.options.connectionName;
+			}
+
+			if (c.connectionId === this.connectionId) {
+				idx = count;
+			}
+
+			return {
+				connection: c,
+				displayName: finalName,
+				name: srv,
+			};
+		});
+
+		// move server of current connection to the top of the list so it is the default
+		if (idx >= 1) {
+			let tmp = values[0];
+			values[0] = values[idx];
+			values[idx] = tmp;
 		}
 
-		// change the database inputbox value to the connection's database if there is one
-		if (databaseName && databaseName !== constants.master) {
-			this.sourceDatabaseDropDown!.value = databaseName;
-		}
+		values = values.reduce((uniqueValues: { connection: azdata.connection.ConnectionProfile, displayName: string, name: string }[], conn) => {
+			let exists = uniqueValues.find(x => x.displayName === conn.displayName);
+			if (!exists) {
+				uniqueValues.push(conn);
+			}
+			return uniqueValues;
+		}, []);
 
-		// change icon to the one without a plus sign
-		this.selectConnectionButton!.iconPath = IconPathHelper.connect;
+		return values;
 	}
 
-	private createProjectLocationRow(view: azdataType.ModelView): azdataType.FlexContainer {
-		const browseFolderButton: azdataType.Component = this.createBrowseFolderButton(view);
+	protected async getDatabaseValues(connectionId: string) {
+		let idx = -1;
+		let count = -1;
 
-		this.projectLocationTextBox = view.modelBuilder.inputBox().withProps({
-			value: '',
+		let values = (await azdata.connection.listDatabases(connectionId)).sort((a, b) => a.localeCompare(b)).map(db => {
+			count++;
+
+			// put currently selected db at the top of the dropdown if there is one
+			if (this.profile && this.profile.databaseName && this.profile.databaseName === db) {
+				idx = count;
+			}
+
+			return db;
+		});
+
+		if (idx >= 0) {
+			let tmp = values[0];
+			values[0] = values[idx];
+			values[idx] = tmp;
+		}
+		return values;
+	}
+
+	private createConnectionButton(view: azdata.ModelView) {
+		this.connectionButton = view.modelBuilder.button().withProps({
+			ariaLabel: constants.selectConnection,
+			iconPath: IconPathHelper.selectConnection,
+			height: '20px',
+			width: '20px'
+		}).component();
+
+		this.connectionButton.onDidClick(async () => {
+			await this.connectionButtonClick();
+			this.connectionButton!.iconPath = IconPathHelper.connect;
+		});
+	}
+
+	private async connectionButtonClick() {
+		let connection = await azdata.connection.openConnectionDialog();
+		if (connection) {
+			this.connectionId = connection.connectionId;
+			this.populateServerDropdown();
+		}
+	}
+
+	private createProjectLocationRow(view: azdata.ModelView): azdata.FlexContainer {
+		const browseFolderButton: azdata.Component = this.createBrowseFileButton(view);
+
+		const value = this.project ? this.project.projectFilePath : ' ';
+
+		this.projectFileTextBox = view.modelBuilder.inputBox().withProps({
+			value: value,
 			ariaLabel: constants.projectLocationLabel,
 			placeHolder: constants.projectToUpdatePlaceholderText,
 			width: cssStyles.updateProjectFromDatabaseTextboxWidth
 		}).component();
 
-		this.projectLocationTextBox.onTextChanged(() => {
-			this.projectLocationTextBox!.updateProperty('title', this.projectLocationTextBox!.value);
+		this.projectFileTextBox.onTextChanged(() => {
+			this.projectFileTextBox!.updateProperty('title', this.projectFileTextBox!.value);
 			this.tryEnableUpdateButton();
 		});
 
@@ -238,13 +373,13 @@ export class UpdateProjectFromDatabaseDialog {
 			width: cssStyles.updateProjectFromDatabaseLabelWidth
 		}).component();
 
-		const projectLocationRow = view.modelBuilder.flexContainer().withItems([projectLocationLabel, this.projectLocationTextBox], { flex: '0 0 auto', CSSStyles: { 'margin-right': '10px', 'margin-bottom': '-10px' } }).withLayout({ flexFlow: 'row', alignItems: 'center' }).component();
-		projectLocationRow.addItem(browseFolderButton, { CSSStyles: { 'margin-right': '0px', 'margin-bottom': '-10px' } });
+		const projectLocationRow = view.modelBuilder.flexContainer().withItems([projectLocationLabel, this.projectFileTextBox], { flex: '0 0 auto', CSSStyles: { 'margin-right': '10px', 'margin-bottom': '-5px', 'margin-top': '-10px' } }).component();
+		projectLocationRow.addItem(browseFolderButton, { CSSStyles: { 'margin-right': '0px', 'margin-bottom': '-5px', 'margin-top': '-10px' } });
 
 		return projectLocationRow;
 	}
 
-	private createBrowseFolderButton(view: azdataType.ModelView): azdataType.ButtonComponent {
+	private createBrowseFileButton(view: azdata.ModelView): azdata.ButtonComponent {
 		const browseFolderButton = view.modelBuilder.button().withProps({
 			ariaLabel: constants.browseButtonText,
 			iconPath: IconPathHelper.folder_blue,
@@ -253,54 +388,95 @@ export class UpdateProjectFromDatabaseDialog {
 		}).component();
 
 		browseFolderButton.onDidClick(async () => {
-			let folderUris = await vscode.window.showOpenDialog({
-				canSelectFiles: false,
-				canSelectFolders: true,
+			let fileUris = await vscode.window.showOpenDialog({
+				canSelectFiles: true,
+				canSelectFolders: false,
 				canSelectMany: false,
 				openLabel: constants.selectString,
-				defaultUri: newProjectTool.defaultProjectSaveLocation()
+				defaultUri: newProjectTool.defaultProjectSaveLocation(),
+				filters: {
+					'Files': ['sqlproj']
+				}
 			});
-			if (!folderUris || folderUris.length === 0) {
+
+			if (!fileUris || fileUris.length === 0) {
 				return;
 			}
 
-			this.projectLocationTextBox!.value = folderUris[0].fsPath;
-			this.projectLocationTextBox!.updateProperty('title', folderUris[0].fsPath);
+			this.projectFileTextBox!.value = fileUris[0].fsPath;
+			this.projectFileTextBox!.updateProperty('title', fileUris[0].fsPath);
 		});
 
 		return browseFolderButton;
 	}
 
-	private containsScriptFiles(): boolean {
-		let toReturn: boolean = false;
-		let dirs: string[] = [];
-		const fs = require('fs');
-		let path: string;
+	private createFolderStructureRow(view: azdata.ModelView): azdata.FlexContainer {
+		this.folderStructureDropDown = view.modelBuilder.dropDown().withProps({
+			values: [constants.file, constants.flat, constants.objectType, constants.schema, constants.schemaObjectType],
+			value: constants.schemaObjectType,
+			ariaLabel: constants.folderStructureLabel,
+			required: true,
+			width: cssStyles.updateProjectFromDatabaseTextboxWidth
+		}).component();
 
-		dirs.push(this.projectLocationTextBox!.value!);
+		this.folderStructureDropDown.onValueChanged(() => {
+			this.tryEnableUpdateButton();
+		});
 
-		while (dirs.length) {
-			fs.readdirSync(dirs[0]).forEach((file: string) => {
-				path = dirs[0] + '\\' + file;
+		const folderStructureLabel = view.modelBuilder.text().withProps({
+			value: constants.folderStructureLabel,
+			requiredIndicator: true,
+			width: cssStyles.createProjectFromDatabaseLabelWidth
+		}).component();
 
-				if (file.substr(-('.sql'.length)) === '.sql') {
-					toReturn = true;
+		const folderStructureRow = view.modelBuilder.flexContainer().withItems([folderStructureLabel, <azdata.DropDownComponent>this.folderStructureDropDown], { flex: '0 0 auto', CSSStyles: { 'margin-right': '10px', 'margin-bottom': '-10px' } }).withLayout({ flexFlow: 'row', alignItems: 'center' }).component();
 
-				} else if (fs.lstatSync(path).isDirectory()) {
-					dirs.push(path);
-				}
-			});
+		return folderStructureRow;
+	}
 
-			dirs.shift();
-		}
+	private createActionRow(view: azdata.ModelView): azdata.FlexContainer {
+		this.compareActionRadioButton = view.modelBuilder.radioButton().withProps({
+			name: 'action',
+			label: constants.compareActionRadioButtonLabel
+		}).component();
 
-		return toReturn;
+		this.updateActionRadioButton = view.modelBuilder.radioButton().withProps({
+			name: 'action',
+			label: constants.updateActionRadioButtonLabel
+		}).component();
+
+		this.compareActionRadioButton.onDidClick(async () => {
+			this.action = UpdateAction.Compare;
+			this.tryEnableUpdateButton();
+		});
+
+		this.updateActionRadioButton.onDidClick(async () => {
+			this.action = UpdateAction.Update;
+			this.tryEnableUpdateButton();
+		});
+
+		let radioButtons = view.modelBuilder.flexContainer()
+			.withLayout({ flexFlow: 'column' })
+			.withItems([this.compareActionRadioButton, this.updateActionRadioButton])
+			.withProps({ ariaRole: 'radiogroup' })
+			.component();
+
+		const actionLabel = view.modelBuilder.text().withProps({
+			value: constants.actionLabel,
+			requiredIndicator: true,
+			width: cssStyles.updateProjectFromDatabaseLabelWidth
+		}).component();
+
+		const actionRow = view.modelBuilder.flexContainer().withItems([actionLabel, <azdata.FlexContainer>radioButtons], { flex: '0 0 auto', CSSStyles: { 'margin-right': '10px', 'margin-bottom': '-10px' } }).withLayout({ flexFlow: 'row', alignItems: 'center' }).component();
+
+		return actionRow;
 	}
 
 	// only enable Update button if all fields are filled
 	public tryEnableUpdateButton(): void {
-		if (this.sourceConnectionTextBox!.value && this.sourceDatabaseDropDown!.value &&
-			this.projectLocationTextBox!.value) {
+		if (this.serverDropdown!.value && this.databaseDropdown!.value &&
+			this.projectFileTextBox!.value && this.folderStructureDropDown!.value &&
+			this.action !== undefined) {
 			this.dialog.okButton.enabled = true;
 		} else {
 			this.dialog.okButton.enabled = false;
@@ -308,11 +484,43 @@ export class UpdateProjectFromDatabaseDialog {
 	}
 
 	public async handleUpdateButtonClick(): Promise<void> {
-		// TODO: Find way to not hardcode folderStructure
+		const serverDropdownValue = this.serverDropdown!.value! as azdata.CategoryValue as ConnectionDropdownValue;
+		const ownerUri = await azdata.connection.getUriForConnection(serverDropdownValue.connection.connectionId);
+
+		const sourceEndpointInfo: mssql.SchemaCompareEndpointInfo = {
+			endpointType: mssql.SchemaCompareEndpointType.Database,
+			databaseName: this.databaseDropdown!.value! as string,
+			serverDisplayName: serverDropdownValue.displayName,
+			serverName: serverDropdownValue.name!,
+			connectionDetails: this.profile!,
+			ownerUri: ownerUri,
+			projectFilePath: '',
+			folderStructure: '',
+			targetScripts: [],
+			dsp: '',
+			packageFilePath: '',
+			connectionName: serverDropdownValue.connection.options.connectionName
+		};
+
+		const targetEndpointInfo: mssql.SchemaCompareEndpointInfo = {
+			endpointType: mssql.SchemaCompareEndpointType.Project,
+			projectFilePath: this.projectFileTextBox!.value!,
+			folderStructure: this.folderStructureDropDown!.value as string,
+			targetScripts: [],
+			dsp: '',
+			connectionDetails: this.profile!,
+			databaseName: '',
+			serverDisplayName: '',
+			serverName: '',
+			ownerUri: '',
+			packageFilePath: '',
+		};
+
+
 		const model: UpdateDataModel = {
-			folderStructure: 'test',
-			projectPath: this.projectLocationTextBox!.value!,
-			serverId: this.connectionId!,
+			sourceEndpointInfo: sourceEndpointInfo,
+			targetEndpointInfo: targetEndpointInfo,
+			action: this.action!
 		};
 
 		getAzdataApi()!.window.closeDialog(this.dialog);
@@ -327,15 +535,22 @@ export class UpdateProjectFromDatabaseDialog {
 				return false;
 			}
 			// the selected location should be an existing directory
-			const parentDirectoryExists = await exists(this.projectLocationTextBox!.value!);
+			const parentDirectoryExists = await exists(path.dirname(this.projectFileTextBox!.value!));
 			if (!parentDirectoryExists) {
-				this.showErrorMessage(constants.ProjectParentDirectoryNotExistError(this.projectLocationTextBox!.value!));
+				this.showErrorMessage(constants.ProjectParentDirectoryNotExistError(this.projectFileTextBox!.value!));
 				return false;
 			}
 
-			// the selected location should contain .sql files
-			if (!this.containsScriptFiles()) {
-				this.showErrorMessage(constants.noScriptFiles);
+			// the selected location must contain a .sqlproj file
+			const fileExists = await exists(this.projectFileTextBox!.value!);
+			if (!fileExists) {
+				this.showErrorMessage(constants.noSqlProjFile);
+				return false;
+			}
+
+			// schema compare extension must be downloaded
+			if (!vscode.extensions.getExtension(constants.schemaCompareExtensionId)) {
+				this.showErrorMessage(constants.noSchemaCompareExtension);
 				return false;
 			}
 
@@ -352,4 +567,8 @@ export class UpdateProjectFromDatabaseDialog {
 			level: getAzdataApi()!.window.MessageLevel.Error
 		};
 	}
+}
+
+export interface ConnectionDropdownValue extends azdata.CategoryValue {
+	connection: azdata.connection.ConnectionProfile;
 }

@@ -1,5 +1,12 @@
+import * as mssql from '../../../../mssql';
+
 export interface UpdateDataModel {
-	folderStructure: string;
-	projectPath: string;
-	serverId: string;
+	sourceEndpointInfo: mssql.SchemaCompareEndpointInfo;
+	targetEndpointInfo: mssql.SchemaCompareEndpointInfo;
+	action: UpdateAction;
+}
+
+export const enum UpdateAction {
+	Compare = 0,
+	Update = 1
 }

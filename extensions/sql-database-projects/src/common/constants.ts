@@ -172,12 +172,21 @@ export const ProjectParentDirectoryNotExistError = (location: string): string =>
 export const ProjectDirectoryAlreadyExistError = (projectName: string, location: string): string => { return localize('dataworkspace.projectDirectoryAlreadyExistError', "There is already a directory named '{0}' in the selected location: '{1}'.", projectName, location); };
 
 // Update Project From Database dialog strings
-
 export const updateProjectFromDatabaseDialogName = localize('updateProjectFromDatabaseDialogName', "Update project from database");
 export const updateProjectDialogOkButtonText = localize('updateProjectDialogOkButtonText', "Update");
-export const noScriptFiles = localize('noScriptFiles', "The target project folder does not include any .sql files to update.");
-export const projectToUpdatePlaceholderText = localize('projectToUpdatePlaceholderText', "Select location of project");
-export const ok = localize('Okay', 'Okay');
+export const noSqlProjFile = localize('noSqlProjFile', "The selected project file does not exist");
+export const noSchemaCompareExtension = localize('noSchemaCompareExtension', "The schema-compare extension needs to be downloaded to a update a project from a database");
+export const projectToUpdatePlaceholderText = localize('projectToUpdatePlaceholderText', "Select project file");
+export const updateAction = localize('updateAction', "Update action");
+export const compareActionRadioButtonLabel = localize('compareActionRadiButtonLabel', "View changes in Schema Compare");
+export const updateActionRadioButtonLabel = localize('updateActionRadiButtonLabel', "Apply all changes");
+export const actionLabel = localize('actionLabel', "Action");
+
+// Update project from database
+export const applySuccess = localize('applySuccess', "Project was successfully updated");
+export const equalComparison = localize('equalComparison', "The project is already up to date with the database");
+export const applyError = localize('applyError', "There was an error updating the project");
+export const scmpTempFile = localize('scmpTempFile', ".temp.scmp");
 
 // Error messages
 
@@ -190,7 +199,7 @@ export const unknownDataSourceType = localize('unknownDataSourceType', "Unknown 
 export const invalidSqlConnectionString = localize('invalidSqlConnectionString', "Invalid SQL connection string");
 export const extractTargetRequired = localize('extractTargetRequired', "Target information for extract is required to create database project.");
 export const schemaCompareNotInstalled = localize('schemaCompareNotInstalled', "Schema compare extension installation is required to run schema compare");
-export const buildFailedCannotStartSchemaCompare = localize('buildFailedCannotStartSchemaCompare', "Schema compare could not start because build failed");
+export const buildFailedCannotStartSchemaCompare = localize('buildFailedCannotStartSchemaCompare', "There was an error starting Schema Compare");
 export const updateProjectForRoundTrip = localize('updateProjectForRoundTrip', "To build this project, Azure Data Studio needs to update targets, references, and system database references. If the project is created in SSDT, it will continue to work in both tools. Do you want Azure Data Studio to update the project?");
 export const updateProjectDatabaseReferencesForRoundTrip = localize('updateProjectDatabaseReferencesForRoundTrip', "To build this project, Azure Data Studio needs to update system database references. If the project is created in SSDT, it will continue to work in both tools. Do you want Azure Data Studio to update the project?");
 export const databaseReferenceTypeRequired = localize('databaseReferenceTypeRequired', "Database reference type is required for adding a reference to a database");
