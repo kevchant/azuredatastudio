@@ -707,6 +707,7 @@ describe('BooksTreeViewTests', function () {
 		];
 		runs.forEach(function (run) {
 			describe('BookTreeViewProvider.Commands on ' + run.it, function (): void {
+				let iterations = 200;
 				before(async () => {
 					await fs.mkdir(rootFolderPath);
 					if (run.it === 'v1') {
@@ -729,129 +730,130 @@ describe('BooksTreeViewTests', function () {
 					sinon.restore();
 					await vscode.commands.executeCommand('workbench.action.closeAllEditors');
 				});
+				while(iterations-- > 0) {
+					it('should add book and initialize book on openBook', async () => {
+						should(bookTreeViewProvider.books.length).equal(0, 'Invalid books on initialize.');
 
-				it('should add book and initialize book on openBook', async () => {
-					should(bookTreeViewProvider.books.length).equal(0, 'Invalid books on initialize.');
+						let showPreviewSpy = sinon.spy(bookTreeViewProvider, 'showPreviewFile');
 
-					let showPreviewSpy = sinon.spy(bookTreeViewProvider, 'showPreviewFile');
+						await bookTreeViewProvider.openBook(rootFolderPath);
+						should(bookTreeViewProvider.books.length).equal(1, 'Failed to initialize the book on open');
+						should(showPreviewSpy.notCalled).be.true('Should not call showPreviewFile when showPreview isn\' true');
+					});
 
-					await bookTreeViewProvider.openBook(rootFolderPath);
-					should(bookTreeViewProvider.books.length).equal(1, 'Failed to initialize the book on open');
-					should(showPreviewSpy.notCalled).be.true('Should not call showPreviewFile when showPreview isn\' true');
-				});
+					it('openMarkdown should open markdown in the editor', async () => {
+						let executeCommandSpy = sinon.spy(vscode.commands, 'executeCommand');
+						let notebookPath = run.folderPaths.markdownFile;
+						bookTreeViewProvider.openMarkdown(notebookPath);
+						should(executeCommandSpy.calledWith('markdown.showPreview')).be.true('openMarkdown should have called markdown.showPreview');
+					});
 
-				it('openMarkdown should open markdown in the editor', async () => {
-					let executeCommandSpy = sinon.spy(vscode.commands, 'executeCommand');
-					let notebookPath = run.folderPaths.markdownFile;
-					bookTreeViewProvider.openMarkdown(notebookPath);
-					should(executeCommandSpy.calledWith('markdown.showPreview')).be.true('openMarkdown should have called markdown.showPreview');
-				});
+					// TODO: Need to investigate why it's failing on linux.
+					it.skip('openNotebook should open notebook in the editor', async () => {
+						let showNotebookSpy = sinon.spy(azdata.nb, 'showNotebookDocument');
+						let notebookPath = run.folderPaths.notebook2File;
+						await bookTreeViewProvider.openNotebook(notebookPath);
+						should(showNotebookSpy.calledWith(vscode.Uri.file(notebookPath))).be.true(`Should have opened the notebook from ${notebookPath} in the editor.`);
+					});
 
-				// TODO: Need to investigate why it's failing on linux.
-				it.skip('openNotebook should open notebook in the editor', async () => {
-					let showNotebookSpy = sinon.spy(azdata.nb, 'showNotebookDocument');
-					let notebookPath = run.folderPaths.notebook2File;
-					await bookTreeViewProvider.openNotebook(notebookPath);
-					should(showNotebookSpy.calledWith(vscode.Uri.file(notebookPath))).be.true(`Should have opened the notebook from ${notebookPath} in the editor.`);
-				});
+					it('openNotebookAsUntitled should open a notebook as untitled file in the editor @UNSTABLE@', async () => {
+						let notebookPath = run.folderPaths.notebook2File;
+						await bookTreeViewProvider.openNotebookAsUntitled(notebookPath);
+						should(azdata.nb.notebookDocuments.find(doc => doc.uri.scheme === 'untitled')).not.be.undefined();
+					});
 
-				it('openNotebookAsUntitled should open a notebook as untitled file in the editor @UNSTABLE@', async () => {
-					let notebookPath = run.folderPaths.notebook2File;
-					await bookTreeViewProvider.openNotebookAsUntitled(notebookPath);
-					should(azdata.nb.notebookDocuments.find(doc => doc.uri.scheme === 'untitled')).not.be.undefined();
-				});
+					it('openExternalLink should open link', async () => {
+						let executeCommandSpy = sinon.spy(vscode.commands, 'executeCommand');
+						let notebookPath = run.folderPaths.markdownFile;
+						bookTreeViewProvider.openMarkdown(notebookPath);
+						should(executeCommandSpy.calledWith('markdown.showPreview')).be.true('openMarkdown should have called markdown.showPreview');
+					});
 
-				it('openExternalLink should open link', async () => {
-					let executeCommandSpy = sinon.spy(vscode.commands, 'executeCommand');
-					let notebookPath = run.folderPaths.markdownFile;
-					bookTreeViewProvider.openMarkdown(notebookPath);
-					should(executeCommandSpy.calledWith('markdown.showPreview')).be.true('openMarkdown should have called markdown.showPreview');
-				});
+					it('should call showPreviewFile on openBook when showPreview flag is set', async () => {
+						await bookTreeViewProvider.closeBook(bookTreeViewProvider.books[0].bookItems[0]);
+						let showPreviewSpy = sinon.spy(bookTreeViewProvider, 'showPreviewFile');
 
-				it('should call showPreviewFile on openBook when showPreview flag is set', async () => {
-					await bookTreeViewProvider.closeBook(bookTreeViewProvider.books[0].bookItems[0]);
-					let showPreviewSpy = sinon.spy(bookTreeViewProvider, 'showPreviewFile');
+						await bookTreeViewProvider.openBook(rootFolderPath, undefined, true);
+						should(bookTreeViewProvider.books.length).equal(1, 'Failed to initialize the book on open');
+						should(showPreviewSpy.calledOnce).be.true('Should have called showPreviewFile.');
+					});
 
-					await bookTreeViewProvider.openBook(rootFolderPath, undefined, true);
-					should(bookTreeViewProvider.books.length).equal(1, 'Failed to initialize the book on open');
-					should(showPreviewSpy.calledOnce).be.true('Should have called showPreviewFile.');
-				});
+					it('should add book when bookPath contains special characters on openBook @UNSTABLE@', async () => {
+						let rootFolderPath2 = path.join(os.tmpdir(), `BookTestData(1)_${uuid.v4()}`);
+						let dataFolderPath2 = path.join(rootFolderPath2, '_data');
+						let contentFolderPath2 = path.join(rootFolderPath2, 'content');
+						let configFile2 = path.join(rootFolderPath2, '_config.yml');
+						let tableOfContentsFile2 = path.join(dataFolderPath2, 'toc.yml');
+						let notebook2File2 = path.join(contentFolderPath2, 'notebook2.ipynb');
+						await fs.mkdir(rootFolderPath2);
+						await fs.mkdir(dataFolderPath2);
+						await fs.mkdir(contentFolderPath2);
+						await fs.writeFile(configFile2, 'title: Test Book');
+						await fs.writeFile(tableOfContentsFile2, '- title: Notebook1\n  url: /notebook1\n- title: Notebook2\n  url: /notebook2');
+						await fs.writeFile(notebook2File2, '');
 
-				it('should add book when bookPath contains special characters on openBook @UNSTABLE@', async () => {
-					let rootFolderPath2 = path.join(os.tmpdir(), `BookTestData(1)_${uuid.v4()}`);
-					let dataFolderPath2 = path.join(rootFolderPath2, '_data');
-					let contentFolderPath2 = path.join(rootFolderPath2, 'content');
-					let configFile2 = path.join(rootFolderPath2, '_config.yml');
-					let tableOfContentsFile2 = path.join(dataFolderPath2, 'toc.yml');
-					let notebook2File2 = path.join(contentFolderPath2, 'notebook2.ipynb');
-					await fs.mkdir(rootFolderPath2);
-					await fs.mkdir(dataFolderPath2);
-					await fs.mkdir(contentFolderPath2);
-					await fs.writeFile(configFile2, 'title: Test Book');
-					await fs.writeFile(tableOfContentsFile2, '- title: Notebook1\n  url: /notebook1\n- title: Notebook2\n  url: /notebook2');
-					await fs.writeFile(notebook2File2, '');
+						await bookTreeViewProvider.openBook(rootFolderPath2);
+						should(bookTreeViewProvider.books.length).equal(2, 'Failed to initialize the book on open');
 
-					await bookTreeViewProvider.openBook(rootFolderPath2);
-					should(bookTreeViewProvider.books.length).equal(2, 'Failed to initialize the book on open');
+						await promisify(rimraf)(rootFolderPath2);
+					});
 
-					await promisify(rimraf)(rootFolderPath2);
-				});
+					it('should get notebook path with untitled schema on openNotebookAsUntitled', async () => {
+						let notebookUri = bookTreeViewProvider.getUntitledNotebookUri(run.folderPaths.notebook2File);
+						should(notebookUri.scheme).equal('untitled', 'Failed to get untitled uri of the resource');
+					});
 
-				it('should get notebook path with untitled schema on openNotebookAsUntitled', async () => {
-					let notebookUri = bookTreeViewProvider.getUntitledNotebookUri(run.folderPaths.notebook2File);
-					should(notebookUri.scheme).equal('untitled', 'Failed to get untitled uri of the resource');
-				});
+					it('openNotebookFolder without folderPath should prompt for folder path and invoke loadNotebooksInFolder', async () => {
+						const uri = vscode.Uri.file(rootFolderPath);
+						sinon.stub(vscode.window, 'showOpenDialog').returns(Promise.resolve([uri]));
+						let loadNotebooksSpy = sinon.spy(bookTreeViewProvider, 'loadNotebooksInFolder');
+						await bookTreeViewProvider.openNotebookFolder();
 
-				it('openNotebookFolder without folderPath should prompt for folder path and invoke loadNotebooksInFolder', async () => {
-					const uri = vscode.Uri.file(rootFolderPath);
-					sinon.stub(vscode.window, 'showOpenDialog').returns(Promise.resolve([uri]));
-					let loadNotebooksSpy = sinon.spy(bookTreeViewProvider, 'loadNotebooksInFolder');
-					await bookTreeViewProvider.openNotebookFolder();
+						should(loadNotebooksSpy.calledWith(uri.fsPath)).be.true('openNotebookFolder should have called loadNotebooksInFolder passing the folderPath');
+					});
 
-					should(loadNotebooksSpy.calledWith(uri.fsPath)).be.true('openNotebookFolder should have called loadNotebooksInFolder passing the folderPath');
-				});
+					it('openNotebookFolder with folderPath shouldn\'t prompt for folder path but invoke loadNotebooksInFolder with the provided folderPath', async () => {
+						let showOpenDialogSpy = sinon.spy(vscode.window, 'showOpenDialog');
+						let loadNotebooksSpy = sinon.spy(bookTreeViewProvider, 'loadNotebooksInFolder');
+						await bookTreeViewProvider.openNotebookFolder(rootFolderPath);
 
-				it('openNotebookFolder with folderPath shouldn\'t prompt for folder path but invoke loadNotebooksInFolder with the provided folderPath', async () => {
-					let showOpenDialogSpy = sinon.spy(vscode.window, 'showOpenDialog');
-					let loadNotebooksSpy = sinon.spy(bookTreeViewProvider, 'loadNotebooksInFolder');
-					await bookTreeViewProvider.openNotebookFolder(rootFolderPath);
+						should(showOpenDialogSpy.notCalled).be.true('openNotebookFolder with folderPath shouldn\'t prompt to select folder');
+						should(loadNotebooksSpy.calledOnce).be.true('openNotebookFolder should have called loadNotebooksInFolder');
+					});
 
-					should(showOpenDialogSpy.notCalled).be.true('openNotebookFolder with folderPath shouldn\'t prompt to select folder');
-					should(loadNotebooksSpy.calledOnce).be.true('openNotebookFolder should have called loadNotebooksInFolder');
-				});
+					it('openNewBook should prompt for notebook path and invoke openBook', async () => {
+						sinon.stub(vscode.window, 'showOpenDialog').returns(Promise.resolve([vscode.Uri.file(rootFolderPath)]));
+						let openBookSpy = sinon.spy(bookTreeViewProvider, 'openBook');
+						await bookTreeViewProvider.openNewBook();
 
-				it('openNewBook should prompt for notebook path and invoke openBook', async () => {
-					sinon.stub(vscode.window, 'showOpenDialog').returns(Promise.resolve([vscode.Uri.file(rootFolderPath)]));
-					let openBookSpy = sinon.spy(bookTreeViewProvider, 'openBook');
-					await bookTreeViewProvider.openNewBook();
+						should(openBookSpy.calledOnce).be.true('openNewBook should have called openBook');
+					});
 
-					should(openBookSpy.calledOnce).be.true('openNewBook should have called openBook');
-				});
+					it('searchJupyterBooks should call command that opens Search view', async () => {
+						let executeCommandSpy = sinon.spy(vscode.commands, 'executeCommand');
+						await bookTreeViewProvider.searchJupyterBooks(bookTreeViewProvider.books[0].bookItems[0]);
+						should(executeCommandSpy.calledWith('workbench.action.findInFiles')).be.true('searchJupyterBooks should have called command to open Search view');
+					});
 
-				it('searchJupyterBooks should call command that opens Search view', async () => {
-					let executeCommandSpy = sinon.spy(vscode.commands, 'executeCommand');
-					await bookTreeViewProvider.searchJupyterBooks(bookTreeViewProvider.books[0].bookItems[0]);
-					should(executeCommandSpy.calledWith('workbench.action.findInFiles')).be.true('searchJupyterBooks should have called command to open Search view');
-				});
+					it('saveJupyterBooks should prompt location and openBook', async () => {
+						let saveFolderPath = path.join(os.tmpdir(), `Book_${uuid.v4()}`);
+						await fs.mkdir(saveFolderPath);
+						sinon.stub(vscode.window, 'showOpenDialog').returns(Promise.resolve([vscode.Uri.file(saveFolderPath)]));
+						let executeCommandSpy = sinon.spy(vscode.commands, 'executeCommand');
+						await bookTreeViewProvider.saveJupyterBooks();
+						should(executeCommandSpy.calledWith('bookTreeView.openBook')).be.true('saveJupyterBooks should have called command openBook after saving');
 
-				it('saveJupyterBooks should prompt location and openBook', async () => {
-					let saveFolderPath = path.join(os.tmpdir(), `Book_${uuid.v4()}`);
-					await fs.mkdir(saveFolderPath);
-					sinon.stub(vscode.window, 'showOpenDialog').returns(Promise.resolve([vscode.Uri.file(saveFolderPath)]));
-					let executeCommandSpy = sinon.spy(vscode.commands, 'executeCommand');
-					await bookTreeViewProvider.saveJupyterBooks();
-					should(executeCommandSpy.calledWith('bookTreeView.openBook')).be.true('saveJupyterBooks should have called command openBook after saving');
+						await promisify(rimraf)(saveFolderPath);
+					});
 
-					await promisify(rimraf)(saveFolderPath);
-				});
-
-				it('should remove book on closeBook', async () => {
-					await bookTreeViewProvider.openBook(rootFolderPath, undefined, true);
-					should(bookTreeViewProvider.books.length).equal(1, 'Failed to initialize the book on open');
-					let length: number = bookTreeViewProvider.books.length;
-					await bookTreeViewProvider.closeBook(bookTreeViewProvider.books[0].bookItems[0]);
-					should(bookTreeViewProvider.books.length).equal(length - 1, 'Failed to remove the book on close');
-				});
+					it('should remove book on closeBook', async () => {
+						await bookTreeViewProvider.openBook(rootFolderPath, undefined, true);
+						should(bookTreeViewProvider.books.length).equal(1, 'Failed to initialize the book on open');
+						let length: number = bookTreeViewProvider.books.length;
+						await bookTreeViewProvider.closeBook(bookTreeViewProvider.books[0].bookItems[0]);
+						should(bookTreeViewProvider.books.length).equal(length - 1, 'Failed to remove the book on close');
+					});
+				}
 
 				after(async function (): Promise<void> {
 					if (await exists(rootFolderPath)) {
